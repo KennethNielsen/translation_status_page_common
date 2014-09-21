@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 
 from collections import OrderedDict
-import quopri
 from nntplib import decode_header, NNTP
 from datetime import date
-from email import message_from_string
+import email
 import pickle
 from os import path
 import logging
@@ -14,10 +13,14 @@ logging.basicConfig(name='archive', level=logging.DEBUG)
 class DanskGruppenArchive(object):
 
     def __init__(self, article_cache_size=300, cache_file=None):
+        """Initialize local variables"""
+        # Connect to news.gmane.org
         self.nntp = NNTP('news.gmane.org')
         # Setting the group returns information, which right now we ignore
         self.nntp.group('gmane.comp.internationalization.dansk')
-        # Keep a local cache
+
+        # Keep a local cache in an OrderedDict, transferred across session
+        # in a pickled version in a file
         self.article_cache_size = article_cache_size
         self.cache_file = cache_file
         if cache_file and path.isfile(cache_file):
@@ -39,44 +42,79 @@ class DanskGruppenArchive(object):
 
     @property
     def last(self):
-        """Return the last ID"""
+        """Return the last NNTP ID as an int"""
         return self.nntp.group('gmane.comp.internationalization.dansk')[3]
 
-    def _get_article(self, message_spec):
-        """Get an article (cached)"""
+    def _get_article(self, message_id):
+        """Get an article (cached)
+
+        Args:
+            message_id (int): The NNTP ID of the message
+
+        Returns:
+            list: List of byte strings in the message
+        """
         # Clear excess cache
         if len(self.article_cache) > self.article_cache_size:
             self.article_cache.popitem(last=False)
 
         # Check if article is in cache and if not, put it there
-        if message_spec not in self.article_cache:
+        if message_id not in self.article_cache:
             # nntp.article() returns: response, information
-            g, info = self.nntp.article(message_spec)
-            self.article_cache[message_spec] = info
-        return self.article_cache[message_spec]
+            _, info = self.nntp.article(message_id)
+            self.article_cache[message_id] = info
+        return self.article_cache[message_id]
 
-    def get_subject(self, message_spec):
-        """Get the subject of an message"""
-        article = self._get_article(message_spec)
+    def _article_to_email(self, article):
+        """Convert a raw article to an email object
+
+        Args:
+            article (namedtuple): An article named tuple as returned by NNTP
+
+        Returns:
+            email.message: An email message object
+        """
         # article lines are a list of byte strings
         decoded_lines = [line.decode('ascii') for line in article.lines]
         article_string = '\n'.join(decoded_lines)
-        email = message_from_string(article_string)
+        # Make an email object
+        return email.message_from_string(article_string)
+
+    def get_subject(self, message_id):
+        """Get the subject of an message
+
+        Args:
+            message_id (int): The NNTP ID of the the message
+
+        Returns:
+            str: The subject of the article
+        """
+        article = self._get_article(message_id)
+        email = self._article_to_email(article)
+        # The subject may be encoded by NNTP, so decode it
         return decode_header(email['Subject'])
 
-    def get_body(self, message_spec):
-        """Get the body of a message"""
-        article = self._get_article(message_spec)
-        # article lines are a list of byte strings
-        decoded_lines = [line.decode('ascii') for line in article.lines]
-        article_string = '\n'.join(decoded_lines)
-        email = message_from_string(article_string)
+    def get_body(self, message_id):
+        """Get the body of a message
 
+        Args:
+            message_id (int): The NNTP ID of the the message
+
+        Returns:
+            str: The body of the article as a str or None if no body could be
+                found or succesfully decoded
+        """
+        article = self._get_article(message_id)
+        email = self._article_to_email(article)
+
+        # Walk parts of the email and look for text/plain content type
         for part in email.walk():
-
-            if part.get_content_maintype() == 'text':
+            if part.get_content_type() == 'text/plain':
                 body = part.get_payload(decode=True)
-                # Find the text encoding
+                # Find the text encoding from lines like:
+                # text/plain; charset=UTF-8
+                # text/plain; charset=utf-8; format=flowed
+                # Encoding sometimes has "" around it, decode is OK with that
                 for type_part in part['Content-Type'].split(';'):
                     if type_part.strip().startswith('charset='):
                         encoding = type_part.replace('charset=', '')
@@ -87,6 +125,7 @@ class DanskGruppenArchive(object):
                     logging.warning(message, part['Content-Type'])
                     return None
 
+                # Decode and return the body
                 try:
                     body = body.decode(encoding)
                 except LookupError:
@@ -101,7 +140,7 @@ class DanskGruppenArchive(object):
 if __name__ == '__main__':
     dga = DanskGruppenArchive(cache_file='dga_cache')
     last = dga.last
-    #print(dga.get_body(last - 3))
+    dga.get_body(33253)
     for n in range(last-100, last):
         body = dga.get_body(n)
 
