@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 
+"""This module contains the DanskGruppenArchive class which is used access
+Dansk-gruppens email archive on gmane
+"""
+
 from collections import OrderedDict
+# pylint: disable=no-name-in-module
 from nntplib import decode_header, NNTP
-from datetime import date
 import email
 import pickle
 from os import path
@@ -11,6 +15,9 @@ logging.basicConfig(name='archive', level=logging.DEBUG)
 
 
 class DanskGruppenArchive(object):
+    """Class that provides an interface to Dansk-gruppens emails archive on
+    gmane
+    """
 
     def __init__(self, article_cache_size=300, cache_file=None):
         """Initialize local variables"""
@@ -61,11 +68,13 @@ class DanskGruppenArchive(object):
         # Check if article is in cache and if not, put it there
         if message_id not in self.article_cache:
             # nntp.article() returns: response, information
+            # pylint: disable=unbalanced-tuple-unpacking
             _, info = self.nntp.article(message_id)
             self.article_cache[message_id] = info
         return self.article_cache[message_id]
 
-    def _article_to_email(self, article):
+    @staticmethod
+    def _article_to_email(article):
         """Convert a raw article to an email object
 
         Args:
@@ -90,9 +99,9 @@ class DanskGruppenArchive(object):
             str: The subject of the article
         """
         article = self._get_article(message_id)
-        email = self._article_to_email(article)
+        mail = self._article_to_email(article)
         # The subject may be encoded by NNTP, so decode it
-        return decode_header(email['Subject'])
+        return decode_header(mail['Subject'])
 
     def get_body(self, message_id):
         """Get the body of a message
@@ -105,10 +114,10 @@ class DanskGruppenArchive(object):
                 found or succesfully decoded
         """
         article = self._get_article(message_id)
-        email = self._article_to_email(article)
+        mail = self._article_to_email(article)
 
         # Walk parts of the email and look for text/plain content type
-        for part in email.walk():
+        for part in mail.walk():
             if part.get_content_type() == 'text/plain':
                 body = part.get_payload(decode=True)
                 # Find the text encoding from lines like:
@@ -121,7 +130,7 @@ class DanskGruppenArchive(object):
                         break
                 else:
                     message = 'Looking for the character encoding in the '\
-                      'string "%s" went wrong'
+                        'string "%s" went wrong'
                     logging.warning(message, part['Content-Type'])
                     return None
 
@@ -130,7 +139,7 @@ class DanskGruppenArchive(object):
                     body = body.decode(encoding)
                 except LookupError:
                     message = 'Do not know how to handle a body with '\
-                      'charset: %s'
+                        'charset: %s'
                     logging.warning(message, encoding)
                     return None
 
@@ -138,10 +147,10 @@ class DanskGruppenArchive(object):
 
 
 if __name__ == '__main__':
-    dga = DanskGruppenArchive(cache_file='dga_cache')
-    last = dga.last
-    dga.get_body(33253)
-    for n in range(last-100, last):
-        body = dga.get_body(n)
+    DGA = DanskGruppenArchive(cache_file='dga_cache')
+    LAST = DGA.last
+    DGA.get_body(33253)
+    for n in range(LAST-100, LAST):
+        BODY = DGA.get_body(n)
 
-    dga.close()
+    DGA.close()
