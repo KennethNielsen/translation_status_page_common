@@ -145,12 +145,67 @@ class DanskGruppenArchive(object):
 
                 return body
 
+    def get_attachment(self, message_id, filename):
+        """Get attachment by filename
+
+        Args:
+            message_id (int):  The NNTP ID of the the message
+            filename (str): The filename for the attachment
+
+        Returns:
+            bytes: The binary content of the attachment
+        """
+        return self.get_attachments(message_id).get(filename)
+
+    def get_attachments(self, message_id):
+        """Get attachments
+
+        Args:
+            message_id (int):  The NNTP ID of the the message
+
+        Returns:
+            dict: Dict with attachments where keys are filenames and values are
+                their binary content
+        """
+        article = self._get_article(message_id)
+        mail = self._article_to_email(article)
+
+        attachments = {}
+        # Walk parts of the email and look for application/octet-stream
+        # content type
+        for part in mail.walk():
+            content_disp = part['Content-Disposition']
+            if not (content_disp and content_disp.startswith('attachment')):
+                continue
+
+            # Get the filename from a line like: Content-Disposition:
+            # attachment; filename="hitori.master.da.podiff"
+            filename = None
+            for disp_part in content_disp.split(';'):
+                if disp_part.strip().startswith('filename='):
+                    filename = disp_part.strip().replace('filename=', '')
+                    # Strip " from filename
+                    filename = filename.strip('"')
+
+            if filename is None:
+                message = 'Unable to extract filename from '\
+                  'Content-Disposition: %s'
+                logging.warning(message, part['Content-Disposition'])
+                raise Exception('Unable to extract filename')
+
+            attachments[filename] = part.get_payload(decode=True)
+
+        return attachments
+
 
 if __name__ == '__main__':
     DGA = DanskGruppenArchive(cache_file='dga_cache')
     LAST = DGA.last
-    DGA.get_body(33253)
-    for n in range(LAST-100, LAST):
-        BODY = DGA.get_body(n)
+    #print(DGA.get_attachments(33253))
+    for n in range(LAST, LAST-300, -1):
+        ATTACHMENTS = DGA.get_attachments(n)
+        if ATTACHMENTS:
+            print(ATTACHMENTS.keys())
+
 
     DGA.close()
